@@ -547,8 +547,8 @@ class certificate {
         global $DB;
 
         // Check if custom series codes is enabled.
-        if (get_config('customcertelement_seriescode', 'enable_seriescodes')) {
-            return \customcertelement_seriescode\element::generate_code($certificateid);
+        if (get_config('customcertelement_seriescodes', 'enable_seriescodes')) {
+            return \customcertelement_seriescodes\element::generate_code($certificateid);
         }
 
         $uniquecodefound = false;

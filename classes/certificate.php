@@ -530,7 +530,7 @@ class certificate {
         $issue = new \stdClass();
         $issue->userid = $userid;
         $issue->customcertid = $certificateid;
-        $issue->code = self::generate_code($certificateid);
+        $issue->code = self::generate_code($certificateid, false);
         $issue->emailed = 0;
         $issue->timecreated = time();
 
@@ -539,18 +539,87 @@ class certificate {
     }
 
     /**
+     * Generates certificate's code from letters and numbers.
+     *
+     * @return string
+     */
+    public static function generate_code($certificateid, $preview = true) {
+        global $DB;
+
+        // The certificate's course is associated with a vault of codes.
+        $customcert = $DB->get_record('customcert', ['id' => $certificateid]);
+        $vaulted = $DB->record_exists('certelement_seriescode_maps', ['course' => $customcert->course]);
+        if ($vaulted) {
+            return self::seriescodes_strategy($customcert->id, $preview);
+        }
+
+        // The certificate can use just the default ramdom strategy.
+        return self::randomcodes_strategy();
+
+    }
+
+    /**
+     * Fetches a code from allocated seriescodes.
+     *
+     * @return string
+     */
+    public static function seriescodes_strategy($certificateid, $preview) {
+        global $DB;
+
+        $customcert = $DB->get_record('customcert', ['id' => $certificateid], '*', MUST_EXIST);
+        $map = $DB->get_record('certelement_seriescode_maps', ['course' => $customcert->course]);
+
+        $sql = "
+            SELECT csc.id, csc.code
+            FROM {certelement_seriescode_code} csc
+            LEFT JOIN {certelement_seriescode_maps} csm ON csc.vault = csm.vault
+            WHERE csc.used = 0 AND csc.enabled = 1 " . ($map ? "AND csm.course = :courseid" : '') . " ORDER BY csc.id LIMIT 1
+            ";
+
+        $code = $DB->get_record_sql($sql, $map ? ['courseid' => $map->course] : []);
+
+        // This is just a preview. No need to mark the code as used.
+        if ($preview) {
+            return $code->code;
+        }
+
+        // Otherwise we need to ensure a safe transaction to mark the code as used.
+        try {
+            $transaction = $DB->start_delegated_transaction();
+
+            // Fetch an unused code.
+            $code = $DB->get_record_sql($sql, $map ? ['courseid' => $map->course] : []);
+
+            if (!$code) {
+                throw new \Exception(get_string('nocodesavailable', 'customcertelement_seriescodes'));
+            }
+
+            // Look the row to be used.
+            $sql = "SELECT c.id, c.code FROM {certelement_seriescode_code} c WHERE c.id = :id FOR UPDATE";
+            $locked = $DB->get_record_sql($sql, ['id' => $code->id]);
+
+            // Mark the code as used.
+            $DB->set_field('certelement_seriescode_code', 'used', '1', ['id' => $locked->id]);
+
+            // Commit the transaction.
+            $transaction->allow_commit();
+
+        } catch (\Exception $err) {
+            // Rollback the transaction on error.
+            $transaction->rollback($err);
+            throw $err;
+        }
+
+        return $code->code;
+    }
+
+    /**
      * Generates a 10-digit code of random letters and numbers.
      *
      * @return string
      */
-    public static function generate_code($certificateid = null) {
+    public static function randomcodes_strategy() {
         global $DB;
-
-        // Check if custom series codes is enabled.
-        $seriescodes = get_config('customcertelement_seriescodes', 'enable_seriescodes');
-        if ($seriescodes && $certificateid) {
-            return \customcertelement_seriescodes\element::generate_code($certificateid);
-        }
 
         $uniquecodefound = false;
         $code = random_string(10);
@@ -564,4 +633,5 @@ class certificate {
 
         return $code;
     }
+
 }

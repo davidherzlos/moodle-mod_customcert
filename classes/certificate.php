@@ -543,11 +543,12 @@ class certificate {
      *
      * @return string
      */
-    public static function generate_code($certificateid) {
+    public static function generate_code($certificateid = null) {
         global $DB;
 
         // Check if custom series codes is enabled.
-        if (get_config('customcertelement_seriescodes', 'enable_seriescodes')) {
+        $seriescodes = get_config('customcertelement_seriescodes', 'enable_seriescodes');
+        if ($seriescodes && $certificateid) {
             return \customcertelement_seriescodes\element::generate_code($certificateid);
         }
 

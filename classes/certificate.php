@@ -543,9 +543,12 @@ class certificate {
      *
      * @return string
      */
-    public static function generate_code($certificateid, $preview = true) {
+    public static function generate_code($certificateid = null, $preview = true) {
         global $DB;
 
+        if (!$certificateid) {
+            return self::randomcodes_strategy();
+        }
         // The certificate's course is associated with a vault of codes.
         $customcert = $DB->get_record('customcert', ['id' => $certificateid]);
         $vaulted = $DB->record_exists('certelement_seriescode_maps', ['course' => $customcert->course]);
@@ -568,6 +571,7 @@ class certificate {
 
         $customcert = $DB->get_record('customcert', ['id' => $certificateid], '*', MUST_EXIST);
         $map = $DB->get_record('certelement_seriescode_maps', ['course' => $customcert->course]);
+        $vault = $DB->get_record('certelement_seriescode_vault', ['id' => $map->vault]);
 
         $sql = "
             SELECT csc.id, csc.code
@@ -578,16 +582,25 @@ class certificate {
 
         $code = $DB->get_record_sql($sql, $map ? ['courseid' => $map->course] : []);
 
+        if (!$code) {
+            throw new \Exception(get_string('nocodesavailable', 'customcertelement_seriescodes'));
+        }
+
         // This is just a preview. No need to mark the code as used.
         if ($preview) {
             return $code->code;
+        }
+
+        // It is not a preview, but the vault is on testing mode.
+        if ($vault->testingmode) {
+            return $code->code . '(testingmode)';
         }
 
         // Otherwise we need to ensure a safe transaction to mark the code as used.
         try {
             $transaction = $DB->start_delegated_transaction();
 
-            // Fetch an unused code.
+            // Fetch again unused code to ensure one transaction.
             $code = $DB->get_record_sql($sql, $map ? ['courseid' => $map->course] : []);
 
             if (!$code) {

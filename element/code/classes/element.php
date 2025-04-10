@@ -46,10 +46,10 @@ class element extends \mod_customcert\element {
         // Get the page.
         $page = $DB->get_record('customcert_pages', ['id' => $this->get_pageid()], '*', MUST_EXIST);
         // Get the customcert this page belongs to.
-        $customcert = $DB->get_record('customcert', ['templateid' => $page->templateid], '*', MUST_EXIST);
+        $customcert = $DB->get_record('customcert', ['templateid' => $page->templateid]);
 
         if ($preview) {
-            $code = \mod_customcert\certificate::generate_code($customcert->id);
+            $code = \mod_customcert\certificate::generate_code(!empty($customcert) ? $customcert->id : null);
         } else {
             // Now we can get the issue for this user.
             $issue = $DB->get_record('customcert_issues', ['userid' => $user->id, 'customcertid' => $customcert->id],
@@ -75,8 +75,8 @@ class element extends \mod_customcert\element {
         $page = $DB->get_record('customcert_pages', ['id' => $this->get_pageid()], '*', MUST_EXIST);
 
         // Get the customcert this page belongs to.
-        $customcert = $DB->get_record('customcert', ['templateid' => $page->templateid], '*', MUST_EXIST);
-        $code = \mod_customcert\certificate::generate_code($customcert->id);
+        $customcert = $DB->get_record('customcert', ['templateid' => $page->templateid]);
+        $code = \mod_customcert\certificate::generate_code(!empty($customcert) ? $customcert->id : null);
 
         return \mod_customcert\element_helper::render_html_content($this, $code);
     }

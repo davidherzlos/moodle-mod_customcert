@@ -530,7 +530,7 @@ class certificate {
         $issue = new \stdClass();
         $issue->userid = $userid;
         $issue->customcertid = $certificateid;
-        $issue->code = self::generate_code($certificateid, false);
+        $issue->code = self::generate_code($certificateid);
         $issue->emailed = 0;
         $issue->timecreated = time();
 
@@ -543,22 +543,24 @@ class certificate {
      *
      * @return string
      */
-    public static function generate_code($certificateid = null, $preview = true) {
+    public static function generate_code($certificateid = null) {
         global $DB;
 
         if (!$certificateid) {
             return self::randomcodes_strategy();
         }
-        // The certificate's course is associated with a vault of codes.
+
+        // Identify if this customcert belongs to a course associated with a vault of codes.
         $customcert = $DB->get_record('customcert', ['id' => $certificateid]);
-        $vaulted = $DB->record_exists('certelement_seriescode_maps', ['course' => $customcert->course]);
-        if ($vaulted) {
-            return self::seriescodes_strategy($customcert->id, $preview);
+        $hasvault = $DB->record_exists('certelement_seriescode_maps', ['course' => $customcert->course]);
+
+        // Seriescodes is not available for this cert, return a random code.
+        if (!$hasvault) {
+            return self::randomcodes_strategy();
         }
 
-        // The certificate can use just the default ramdom strategy.
-        return self::randomcodes_strategy();
-
+        // TODO: when being manager codes should not be consumed anyways.
+        return self::seriescodes_strategy($customcert->id);
     }
 
     /**
@@ -566,34 +568,33 @@ class certificate {
      *
      * @return string
      */
-    public static function seriescodes_strategy($certificateid, $preview) {
+    public static function seriescodes_strategy($certificateid) {
         global $DB;
 
         $customcert = $DB->get_record('customcert', ['id' => $certificateid], '*', MUST_EXIST);
         $map = $DB->get_record('certelement_seriescode_maps', ['course' => $customcert->course]);
         $vault = $DB->get_record('certelement_seriescode_vault', ['id' => $map->vault]);
+        $shouldusetestingcodes = self::should_use_testingcodes($customcert, $vault);
 
         $sql = "
             SELECT csc.id, csc.code
             FROM {certelement_seriescode_code} csc
             LEFT JOIN {certelement_seriescode_maps} csm ON csc.vault = csm.vault
-            WHERE csc.used = 0 AND csc.enabled = 1 " . ($map ? "AND csm.course = :courseid" : '') . " ORDER BY csc.id LIMIT 1
+            WHERE csc.used = 0 AND csc.enabled = 1 " .
+            ($shouldusetestingcodes ? "OR csc.tested = 0" : '') .
+            ($map ? "AND csm.course = :courseid" : '') . " ORDER BY csc.id LIMIT 1
             ";
 
         $code = $DB->get_record_sql($sql, $map ? ['courseid' => $map->course] : []);
 
+        if (!$code && $shouldusetestingcodes) {
+            // Just reset the codes table to continue testing.
+            $DB->set_field('certelement_seriescode_code', 'tested', '0');
+            $code = $DB->get_record_sql($sql, $map ? ['courseid' => $map->course] : []);
+        }
+
         if (!$code) {
             throw new \Exception(get_string('nocodesavailable', 'customcertelement_seriescodes'));
-        }
-
-        // This is just a preview. No need to mark the code as used.
-        if ($preview) {
-            return $code->code;
-        }
-
-        // It is not a preview, but the vault is on testing mode.
-        if ($vault->testingmode) {
-            return $code->code . '(testingmode)';
         }
 
         // Otherwise we need to ensure a safe transaction to mark the code as used.
@@ -611,8 +612,14 @@ class certificate {
             $sql = "SELECT c.id, c.code FROM {certelement_seriescode_code} c WHERE c.id = :id FOR UPDATE";
             $locked = $DB->get_record_sql($sql, ['id' => $code->id]);
 
-            // Mark the code as used.
-            $DB->set_field('certelement_seriescode_code', 'used', '1', ['id' => $locked->id]);
+            // If testingmode, mark the code as tested.
+            if ($shouldusetestingcodes) {
+                $DB->set_field('certelement_seriescode_code', 'tested', '1', ['id' => $locked->id]);
+                $code->code = $code->code.('('.time().')');
+            } else {
+                // Otherwise mark the code as used.
+                $DB->set_field('certelement_seriescode_code', 'used', '1', ['id' => $locked->id]);
+            }
 
             // Commit the transaction.
             $transaction->allow_commit();
@@ -624,6 +631,14 @@ class certificate {
         }
 
         return $code->code;
+    }
+
+    private static function should_use_testingcodes($certificate, $vault) {
+        $testingmode = $vault->testingmode;
+        $istrackeduser = is_enrolled(\context_course::instance($certificate->course), null, 'moodle/course:isincompletionreports', true);
+        $cm = get_coursemodule_from_instance('customcert', $certificate->id);
+        $cangrade = has_capability('moodle/grade:edit', \context_module::instance($cm->id));
+        return $testingmode || !$istrackeduser || $cangrade;
     }
 
     /**

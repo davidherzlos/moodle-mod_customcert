@@ -546,21 +546,20 @@ class certificate {
     public static function generate_code($certificateid = null) {
         global $DB;
 
+        // In order to use seriescodes the certificate id is mandatory.
         if (!$certificateid) {
-            return self::randomcodes_strategy();
+            return self::new_random_code();
         }
 
-        // Identify if this customcert belongs to a course associated with a vault of codes.
-        $customcert = $DB->get_record('customcert', ['id' => $certificateid]);
-        $hasvault = $DB->record_exists('certelement_seriescode_maps', ['course' => $customcert->course]);
+        // Having a certificate id allows to determine if the course is able to consume codes from a vault.
+        $customcert = $DB->get_record('customcert', ['id' => $certificateid], '*', MUST_EXIST);
+        $mapping = $DB->get_record('certelement_seriescode_maps', ['course' => $customcert->course]);
 
-        // Seriescodes is not available for this cert, return a random code.
-        if (!$hasvault) {
-            return self::randomcodes_strategy();
+        if (!$mapping) {
+            return self::new_random_code();
         }
 
-        // TODO: when being manager codes should not be consumed anyways.
-        return self::seriescodes_strategy($customcert->id);
+        return self::new_seriescode($customcert, $mapping);
     }
 
     /**
@@ -568,64 +567,50 @@ class certificate {
      *
      * @return string
      */
-    public static function seriescodes_strategy($certificateid) {
+    public static function new_seriescode($customcert, $mapping) {
         global $DB;
 
-        $customcert = $DB->get_record('customcert', ['id' => $certificateid], '*', MUST_EXIST);
-        $map = $DB->get_record('certelement_seriescode_maps', ['course' => $customcert->course]);
-        $vault = $DB->get_record('certelement_seriescode_vault', ['id' => $map->vault]);
-        $shouldusetestingcodes = self::should_use_testingcodes($customcert, $vault);
+        $vault = $DB->get_record('certelement_seriescode_vault', ['id' => $mapping->vault]);
+        $shouldtescodes = self::should_use_testcodes($customcert, $vault);
 
         $sql = "
             SELECT csc.id, csc.code
-            FROM {certelement_seriescode_code} csc
-            LEFT JOIN {certelement_seriescode_maps} csm ON csc.vault = csm.vault
-            WHERE csc.used = 0 AND csc.enabled = 1 " .
-            ($shouldusetestingcodes ? "OR csc.tested = 0" : '') .
-            ($map ? "AND csm.course = :courseid" : '') . " ORDER BY csc.id LIMIT 1
-            ";
+              FROM {certelement_seriescode_code} csc
+         LEFT JOIN {certelement_seriescode_maps} csm ON csc.vault = csm.vault
+             WHERE csm.course = :courseid AND " .
+            ($shouldtescodes ? "csc.tested = 0 AND csc.enabled = 1 " : "csc.used = 0 AND csc.enabled = 1 ") .
+            "ORDER BY csc.id LIMIT 1";
 
-        $code = $DB->get_record_sql($sql, $map ? ['courseid' => $map->course] : []);
-
-        if (!$code && $shouldusetestingcodes) {
-            // Just reset the codes table to continue testing.
-            $DB->set_field('certelement_seriescode_code', 'tested', '0');
-            $code = $DB->get_record_sql($sql, $map ? ['courseid' => $map->course] : []);
-        }
-
-        if (!$code) {
-            throw new \Exception(get_string('nocodesavailable', 'customcertelement_seriescodes'));
-        }
-
-        // Otherwise we need to ensure a safe transaction to mark the code as used.
+        // We need to make sure the retrieved code is the same marked either as tested or used.
         try {
             $transaction = $DB->start_delegated_transaction();
 
-            // Fetch again unused code to ensure one transaction.
-            $code = $DB->get_record_sql($sql, $map ? ['courseid' => $map->course] : []);
+            $code = $DB->get_record_sql($sql, $mapping ? ['courseid' => $mapping->course] : []);
 
-            if (!$code) {
-                throw new \Exception(get_string('nocodesavailable', 'customcertelement_seriescodes'));
+            // When testing we can re-start the loop to preview seriescodes for free.
+            if (!$code && $shouldtescodes) {
+                $DB->set_field('certelement_seriescode_code', 'tested', '0', ['vault' => $vault->id]);
+                $code = $DB->get_record_sql($sql, $mapping ? ['courseid' => $mapping->course] : []);
             }
 
-            // Look the row to be used.
+            // If not testing we cannot continue if we dont have a code.
+            if (!$code) {
+                $notification = get_string('nocodesavailable', 'customcertelement_seriescodes');
+                throw new \moodle_exception($notification);
+            }
+
             $sql = "SELECT c.id, c.code FROM {certelement_seriescode_code} c WHERE c.id = :id FOR UPDATE";
             $locked = $DB->get_record_sql($sql, ['id' => $code->id]);
-
-            // If testingmode, mark the code as tested.
-            if ($shouldusetestingcodes) {
+            if ($shouldtescodes) {
                 $DB->set_field('certelement_seriescode_code', 'tested', '1', ['id' => $locked->id]);
-                $code->code = $code->code.('('.time().')');
+                $code->code = $code->code . '('.time().')'; // Keep always unique values.
             } else {
-                // Otherwise mark the code as used.
                 $DB->set_field('certelement_seriescode_code', 'used', '1', ['id' => $locked->id]);
             }
 
-            // Commit the transaction.
             $transaction->allow_commit();
 
         } catch (\Exception $err) {
-            // Rollback the transaction on error.
             $transaction->rollback($err);
             throw $err;
         }
@@ -633,7 +618,7 @@ class certificate {
         return $code->code;
     }
 
-    private static function should_use_testingcodes($certificate, $vault) {
+    private static function should_use_testcodes($certificate, $vault) {
         $testingmode = $vault->testingmode;
         $istrackeduser = is_enrolled(\context_course::instance($certificate->course), null, 'moodle/course:isincompletionreports', true);
         $cm = get_coursemodule_from_instance('customcert', $certificate->id);
@@ -646,7 +631,7 @@ class certificate {
      *
      * @return string
      */
-    public static function randomcodes_strategy() {
+    public static function new_random_code() {
         global $DB;
 
         $uniquecodefound = false;

@@ -106,10 +106,10 @@ class report_table extends \table_sql {
             $this->is_downloading($download, 'customcert-report');
         }
 
-        if (!$this->is_downloading()) {
-            $columns[] = 'download';
-            $headers[] = get_string('file');
-        }
+        /*if (!$this->is_downloading()) {*/
+        /*    $columns[] = 'download';*/
+        /*    $headers[] = get_string('file');*/
+        /*}*/
 
         if (!$this->is_downloading() && has_capability('mod/customcert:manage', $context)) {
             $columns[] = 'actions';
@@ -183,25 +183,25 @@ class report_table extends \table_sql {
         return $user->code;
     }
 
-    /**
-     * Generate the download column.
-     *
-     * @param \stdClass $user
-     * @return string
-     */
-    public function col_download($user) {
-        global $OUTPUT;
-
-        $icon = new \pix_icon('download', get_string('download'), 'customcert');
-        $link = new \moodle_url('/mod/customcert/view.php',
-            [
-                'id' => $this->cm->id,
-                'downloadissue' => $user->id,
-            ]
-        );
-
-        return $OUTPUT->action_link($link, '', null, null, $icon);
-    }
+    /*/***/
+    /* * Generate the download column.*/
+    /* **/
+    /* * @param \stdClass $user*/
+    /* * @return string*/
+    /* */*/
+    /*public function col_download($user) {*/
+    /*    global $OUTPUT;*/
+    /**/
+    /*    $icon = new \pix_icon('download', get_string('download'), 'customcert');*/
+    /*    $link = new \moodle_url('/mod/customcert/view.php',*/
+    /*        [*/
+    /*            'id' => $this->cm->id,*/
+    /*            'downloadissue' => $user->id,*/
+    /*        ]*/
+    /*    );*/
+    /**/
+    /*    return $OUTPUT->action_link($link, '', null, null, $icon);*/
+    /*}*/
 
     /**
      * Generate the actions column.

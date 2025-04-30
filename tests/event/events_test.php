@@ -464,4 +464,34 @@ class events_test extends \advanced_testcase {
         $this->assertEquals($templateupdatedevent->contextid, \context_system::instance()->id);
         $this->assertDebuggingNotCalled();
     }
+
+    public function test_deleting_an_issue(): void {
+        // Login as admin
+        $this->setAdminUser();
+
+        // Create a course and enrol a user in it
+        $course = $this->getDataGenerator()->create_course();
+        $user = $this->getDataGenerator()->create_and_enrol($course);
+
+        // Create a custom certificate activity
+        $customcert = $this->getDataGenerator()->create_module('customcert', ['course' => $course->id]);
+
+        // Issue the custom certificate to the user.
+        $issueid = \mod_customcert\certificate::issue_certificate($customcert->id, $user->id);
+
+        // Now delete the issue.
+        $sink = $this->redirectEvents();
+        \mod_customcert\external::delete_issue($customcert->id, $issueid);
+        $events = $sink->get_events();
+        $this->assertCount(1, $events);
+
+        $event = array_shift($events);
+
+        // Check that the event data is valid.
+        $this->assertInstanceOf('\mod_customcert\event\certificate_deleted', $event);
+        $this->assertEquals($issueid, $event->objectid);
+        $this->assertEquals(\context_module::instance($customcert->cmid)->id, $event->contextid);
+        $this->assertEquals($user->id, $event->relateduserid);
+        $this->assertDebuggingNotCalled();
+    }
 }

@@ -87,7 +87,16 @@ if ($deleteissue && $canmanage && confirm_sesskey()) {
     }
 
     // Delete the issue.
+    $issue = $DB->get_record('customcert_issues', ['id' => $deleteissue, 'customcertid' => $customcert->id], '*', MUST_EXIST);
     $DB->delete_records('customcert_issues', ['id' => $deleteissue, 'customcertid' => $customcert->id]);
+
+    // Trigger event.
+    $event = \mod_customcert\event\certificate_deleted::create([
+        'objectid' => $issue->id,
+        'context' => $context,
+        'relateduserid' => $issue->userid,
+    ]);
+    $event->trigger();
 
     // Redirect back to the manage templates page.
     redirect(new moodle_url('/mod/customcert/view.php', ['id' => $id]));

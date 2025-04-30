@@ -366,7 +366,7 @@ class certificate {
 
         $orderby = $sort ?: $DB->sql_fullname();
 
-        $sql = "SELECT $query->selects, ci.id as issueid, ci.code, ci.timecreated
+        $sql = "SELECT ci.id as issueid, ci.code, ci.timecreated, $query->selects
                   FROM {user} u
             INNER JOIN {customcert_issues} ci ON (u.id = ci.userid)
                        $query->joins

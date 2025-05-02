@@ -196,6 +196,7 @@ class provider implements
                 'context' => $context,
                 'relateduserid' => $issue->userid,
             ]);
+            $event->add_record_snapshot('customcert_issues', $issue);
             $event->trigger();
         }
 
@@ -228,6 +229,7 @@ class provider implements
                     'context' => $context,
                     'relateduserid' => $userid,
                 ]);
+                $event->add_record_snapshot('customcert_issues', $issue);
                 $event->trigger();
             }
 
@@ -261,12 +263,13 @@ class provider implements
         $params = ['customcertid' => $cm->instance] + $userparams;
 
         $issues = $DB->get_records_select('customcert_issues', $select, $params);
-        foreach ($issues as $issued) {
+        foreach ($issues as $issue) {
             $event = \mod_customcert\event\certificate_deleted::create([
-                'objectid' => $issued->id,
+                'objectid' => $issue->id,
                 'context' => $context,
-                'relateduserid' => $issued->userid,
+                'relateduserid' => $issue->userid,
             ]);
+            $event->add_record_snapshot('customcert_issues', $issue);
             $event->trigger();
         }
 

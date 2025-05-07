@@ -530,7 +530,7 @@ class certificate {
         $issue = new \stdClass();
         $issue->userid = $userid;
         $issue->customcertid = $certificateid;
-        $issue->code = self::generate_code($certificateid);
+        $issue->code = self::generate_code($certificateid, $userid);
         $issue->emailed = 0;
         $issue->timecreated = time();
 
@@ -543,7 +543,7 @@ class certificate {
      *
      * @return string
      */
-    public static function generate_code($certificateid = null) {
+    public static function generate_code($certificateid = null, $userid = null) {
         global $DB;
 
         // In order to use seriescodes the certificate id is mandatory.
@@ -559,7 +559,7 @@ class certificate {
             return self::new_random_code();
         }
 
-        return self::new_seriescode($customcert, $mapping);
+        return self::new_seriescode($customcert, $mapping, $userid);
     }
 
     /**
@@ -567,11 +567,11 @@ class certificate {
      *
      * @return string
      */
-    public static function new_seriescode($customcert, $mapping) {
+    public static function new_seriescode($customcert, $mapping, $userid = null) {
         global $DB;
 
         $vault = $DB->get_record('certelement_seriescode_vault', ['id' => $mapping->vault]);
-        $shouldtescodes = self::should_use_testcodes($customcert, $vault);
+        $shouldtescodes = self::should_use_testcodes($customcert, $vault, $userid);
 
         $sql = "
             SELECT csc.id, csc.code
@@ -618,11 +618,11 @@ class certificate {
         return $code->code;
     }
 
-    private static function should_use_testcodes($certificate, $vault) {
+    private static function should_use_testcodes($certificate, $vault, $userid = null) {
         $testingmode = $vault->testingmode;
-        $istrackeduser = is_enrolled(\context_course::instance($certificate->course), null, 'moodle/course:isincompletionreports', true);
+        $istrackeduser = is_enrolled(\context_course::instance($certificate->course), $userid, 'moodle/course:isincompletionreports', true);
         $cm = get_coursemodule_from_instance('customcert', $certificate->id);
-        $cangrade = has_capability('moodle/grade:edit', \context_module::instance($cm->id));
+        $cangrade = has_capability('moodle/grade:edit', \context_module::instance($cm->id), $userid);
         return $testingmode || !$istrackeduser || $cangrade;
     }
 

@@ -261,6 +261,8 @@ class certificate {
      * @throws \moodle_exception
      */
     public static function download_all_issues_for_instance(\mod_customcert\template $template, array $issues): void {
+        global $CFG, $DB;
+
         $zipdir = make_request_directory();
         if (!$zipdir) {
             return;
@@ -270,16 +272,128 @@ class certificate {
         $zipfilename = $zipfilenameprefix . "_" . self::ZIP_FILE_NAME_DOWNLOAD_ALL_CERTIFICATES;
         $zipfullpath = $zipdir . DIRECTORY_SEPARATOR . $zipfilename;
 
+        // PREMERGENCY CODE
+        require_once($CFG->dirroot . '/local/document_expiry/locallib.php');
+
+        // Start with output buffering and immediate headers
+        @set_time_limit(0);  // Unlimited time
+        raise_memory_limit(MEMORY_EXTRA);
+
+        // Identify latest issues and prepare all needed data in bulk
+        $userIssues = [];
+        $latestIssueIds  = [];
+        foreach($issues as $issue) {
+            $userid = $issue->id;        // userid
+            $issueid = $issue->issueid;   // certificate issue id
+
+            if (!isset($userIssues[$userid])) {
+                $userIssues[$userid] = [];
+            }
+            $userIssues[$userid][] = $issue;
+
+            // Track latest issue (highest ID)
+            if (!isset($latestIssueIds[$userid]) || $issueid > $latestIssueIds[$userid]) {
+                $latestIssueIds[$userid] = $issueid;
+            }
+        }
+
+        // bulk fetch all document_expiry records in one query
+        $expirymap = [];
+        if(!empty($issues)) {
+            $allIssueIds = array_column($issues, 'issueid');
+
+            list($sql, $params) = $DB->get_in_or_equal($allIssueIds, SQL_PARAMS_NAMED);
+
+            $expiryRecords = $DB->get_records_sql("
+                   SELECT e.*, i.id as issueid
+                   FROM {document_expiry} e
+                   JOIN {customcert_issues} i ON e.user_id = i.userid
+                   WHERE i.id $sql
+                        AND ((e.objecttable1 = 'customcert_issues' AND e.objectid1 = i.id)
+                         OR (e.objecttable2 = 'customcert_issues' AND e.objectid2 = i.id))
+                  ", $params);
+
+            foreach($expiryRecords as $record) {
+                $expirymap[$record->issueid] = $record;
+            }
+        }
+
+        // get course context
+        $courseid = $template->get_context()->get_course_context()->instanceid;
+        $context = \context_course::instance($courseid);
+
         $ziparchive = new \zip_archive();
-        if ($ziparchive->open($zipfullpath)) {
-            foreach ($issues as $issue) {
-                $userfullname = str_replace(' ', '_', mb_strtolower(format_text(fullname($issue), FORMAT_PLAIN)));
-                $pdfname = $userfullname . DIRECTORY_SEPARATOR . 'certificate.pdf';
-                $filecontents = $template->generate_pdf(false, $issue->id, true);
-                $ziparchive->add_file_from_string($pdfname, $filecontents);
+        if($ziparchive->open($zipfullpath)) {
+            $processed = 0;
+            $total = count($issues);
+            foreach($userIssues as $userid => $userCertificates) {
+
+                foreach($userCertificates as $index => $issue) {
+                    $processed++;
+                    if ($processed % 10 == 0) {
+                        gc_collect_cycles();
+                        flush();
+                    }
+
+                    $userfullname = str_replace(' ', '_', mb_strtolower(format_text(fullname($issue), FORMAT_PLAIN)));
+                    $isLatest = ($index === 0);
+
+                    if($isLatest || count($userCertificates) === 1) {
+                        // process as normal certificate
+                        $pdfname = $userfullname . DIRECTORY_SEPARATOR . 'certificate.pdf';
+                        $filecontents = $template->generate_pdf(false, $issue->id, true);
+                        $ziparchive->add_file_from_string($pdfname, $filecontents);
+                    } else if (isset($expirymap[$issue->issueid])) {
+
+                        // older certificate use document expiry link
+                        $files = local_document_expiry_get_files($expirymap[$issue->issueid], $context, true, false);
+
+                        if (empty($files)) {
+                            throw new \moodle_exception('filenotfound', 'customcert', '', $issue->issueid);
+                        }
+
+                        if(!empty($files)) {
+                            $pdfname = $userfullname . DIRECTORY_SEPARATOR . 'certificate_' . $issue->timecreated . '.pdf';
+
+                            foreach ($files as $file) {
+                                if ($file->get_filename() != '.') {
+                                    // PROPER WAY to add stored files to zip
+                                    $filecontents = $file->get_content();
+
+                                    if (!$filecontents) {
+                                        throw new \moodle_exception('errorreadingfile', 'customcert', '', $file->get_filename());
+                                    }
+
+                                    if (strpos($filecontents, '%PDF-') !== 0) {
+                                        throw new \moodle_exception('invalidpdf', 'customcert', '', $file->get_filename());
+                                    }
+
+                                    if (!$ziparchive->add_file_from_string($pdfname, $filecontents)) {
+                                        throw new \moodle_exception('erroraddingfile', 'customcert', '', $pdfname);
+                                    }
+
+                                    break; // Just use first valid file
+                                }
+                            }
+                        }
+                    }
+                }
             }
             $ziparchive->close();
         }
+        // END OF PREMERGENCY CODE
+
+        // ORIGINAL CODE
+//        $ziparchive = new \zip_archive();
+//        if ($ziparchive->open($zipfullpath)) {
+//            foreach ($issues as $issue) {
+//                $userfullname = str_replace(' ', '_', mb_strtolower(format_text(fullname($issue), FORMAT_PLAIN)));
+//                $pdfname = $userfullname . DIRECTORY_SEPARATOR . 'certificate.pdf';
+//                $filecontents = $template->generate_pdf(false, $issue->id, true);
+//                $ziparchive->add_file_from_string($pdfname, $filecontents);
+//            }
+//            $ziparchive->close();
+//        }
 
         send_file($zipfullpath, $zipfilename);
         exit();
@@ -366,7 +480,7 @@ class certificate {
 
         $orderby = $sort ?: $DB->sql_fullname();
 
-        $sql = "SELECT $query->selects, ci.id as issueid, ci.code, ci.timecreated
+        $sql = "SELECT ci.id as issueid, ci.code, ci.timecreated, $query->selects
                   FROM {user} u
             INNER JOIN {customcert_issues} ci ON (u.id = ci.userid)
                        $query->joins

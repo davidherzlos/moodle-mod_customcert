@@ -189,6 +189,17 @@ class provider implements
             return;
         }
 
+        $issues = $DB->get_records('customcert_issues', ['customcertid' => $cm->instance]);
+        foreach ($issues as $issue) {
+            $event = \mod_customcert\event\certificate_deleted::create([
+                'objectid' => $issue->id,
+                'context' => $context,
+                'relateduserid' => $issue->userid,
+            ]);
+            $event->add_record_snapshot('customcert_issues', $issue);
+            $event->trigger();
+        }
+
         $DB->delete_records('customcert_issues', ['customcertid' => $cm->instance]);
     }
 
@@ -210,6 +221,18 @@ class provider implements
                 continue;
             }
             $instanceid = $DB->get_field('course_modules', 'instance', ['id' => $context->instanceid], MUST_EXIST);
+            $issues = $DB->get_records('customcert_issues', ['customcertid' => $instanceid, 'userid' => $userid]);
+
+            foreach ($issues as $issue) {
+                $event = \mod_customcert\event\certificate_deleted::create([
+                    'objectid' => $issue->id,
+                    'context' => $context,
+                    'relateduserid' => $userid,
+                ]);
+                $event->add_record_snapshot('customcert_issues', $issue);
+                $event->trigger();
+            }
+
             $DB->delete_records('customcert_issues', ['customcertid' => $instanceid, 'userid' => $userid]);
         }
     }
@@ -238,6 +261,18 @@ class provider implements
 
         $select = "customcertid = :customcertid AND userid $usersql";
         $params = ['customcertid' => $cm->instance] + $userparams;
+
+        $issues = $DB->get_records_select('customcert_issues', $select, $params);
+        foreach ($issues as $issue) {
+            $event = \mod_customcert\event\certificate_deleted::create([
+                'objectid' => $issue->id,
+                'context' => $context,
+                'relateduserid' => $issue->userid,
+            ]);
+            $event->add_record_snapshot('customcert_issues', $issue);
+            $event->trigger();
+        }
+
         $DB->delete_records_select('customcert_issues', $select, $params);
     }
 

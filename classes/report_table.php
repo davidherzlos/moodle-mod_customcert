@@ -200,7 +200,7 @@ class report_table extends \table_sql {
      * @return string
      */
     public function col_download($user) {
-        global $OUTPUT, $CFG;
+        global $OUTPUT, $CFG, $DB;
 
         $icon = new \pix_icon('download', get_string('download'), 'customcert');
 
@@ -216,15 +216,20 @@ class report_table extends \table_sql {
 
         // Custom document expiry link for older records
         require_once($CFG->dirroot . '/local/document_expiry/locallib.php');
-        $documentLink = $user->code; // todo get dmsid based on customcert issue id from DMS table
-        $context = \context_module::instance($this->cm->id);
-        //$dclink = local_document_expiry_get_files($documentLink, $context, false, true);
+        $documentLink = $DB->get_record_sql("
+                        SELECT e.* 
+                        FROM {document_expiry} e
+                        JOIN {customcert_issues} i ON e.user_id = i.userid
+                        WHERE i.id = :issueid
+                          AND ((e.objecttable1 = 'customcert_issues' AND e.objectid1 = i.id)
+                           OR (e.objecttable2 = 'customcert_issues' AND e.objectid2 = i.id))
+                    ", ['issueid' => $user->issueid]);
+
+        $context = \context_course::instance($this->cm->course);
+        $dclink = local_document_expiry_get_files($documentLink, $context, false, true);
 
         if (!empty($dclink)) {
-            return html_writer::link(
-                new \moodle_url($dclink),
-                $OUTPUT->render($icon)
-            );
+            return $OUTPUT->action_link($dclink, '', null, null, $icon);
         }
 
         return '';

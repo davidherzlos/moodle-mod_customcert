@@ -244,3 +244,10 @@ $string['verifycertificateanyone_help'] = 'This setting enables anyone with the 
 $string['verifycertificatedesc'] = 'This link will take you to a new screen where you will be able to verify certificates on the site';
 $string['width'] = 'Width';
 $string['width_help'] = 'This is the width of the certificate PDF in mm. For reference an A4 piece of paper is 210mm wide and a letter is 216mm wide.';
+
+// PREMERGENCY CODE
+$string['erroraddingfile'] = 'Error adding file to ZIP archive: {$a}';
+$string['filenotfound'] = 'Certificate file not found in DMS for issue ID: {$a}';
+$string['errorreadingfile'] = 'Error reading file: {$a}';
+$string['invalidpdf'] = 'File is not a valid PDF: {$a}';
+$string['novalidfiles'] = 'No valid files found in DMS for issue ID: {$a}';

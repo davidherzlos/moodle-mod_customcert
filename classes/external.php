@@ -226,6 +226,7 @@ class external extends \external_api {
                 'context' => $context,
                 'relateduserid' => $issue->userid,
             ]);
+            $event->add_record_snapshot('customcert_issues', $issue);
             $event->trigger();
         }
 

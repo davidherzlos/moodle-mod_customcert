@@ -96,6 +96,7 @@ if ($deleteissue && $canmanage && confirm_sesskey()) {
         'context' => $context,
         'relateduserid' => $issue->userid,
     ]);
+    $event->add_record_snapshot('customcert_issues', $issue);
     $event->trigger();
 
     // Redirect back to the manage templates page.

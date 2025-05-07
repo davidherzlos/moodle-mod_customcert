@@ -97,6 +97,7 @@ function customcert_delete_instance($id) {
             'context' => $context,
             'relateduserid' => $issue->userid,
         ]);
+        $event->add_record_snapshot('customcert_issues', $issue);
         $event->trigger();
     }
 
